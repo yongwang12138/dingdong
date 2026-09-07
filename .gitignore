@@ -1,0 +1,12 @@
+# 构建目录（out-of-source 构建）
+build/
+build-*/
+
+# 构建产物与运行期文件
+bin/
+Output/
+
+# IDE
+.qtcreator/
+CMakeLists.txt.user
+CMakeUserPresets.json
