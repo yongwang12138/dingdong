@@ -28,7 +28,7 @@ public:
     void setAutoStart(bool on);
     void setStayMs(int ms);
 
-    // 首次运行默认写入的提醒（每天 14:55，带默认文本）
+    // 首次运行默认写入的提醒（每天 14:58，带默认文本）
     static QList<ReminderItem> defaultItems();
 
 private:

@@ -25,7 +25,7 @@ AppConfig::AppConfig(const QString& filePath)
 
 QList<ReminderItem> AppConfig::defaultItems()
 {
-    return {{QTime(14, 55), "到点了！到点了！看下支付宝上的基金！！！"}};
+    return {{QTime(14, 58), "到点了！到点了！看下支付宝上的基金！！！"}};
 }
 
 void AppConfig::ensureLoaded() const
@@ -36,7 +36,7 @@ void AppConfig::ensureLoaded() const
     QFile file(m_filePath);
     if(!file.exists())
     {
-        // 首次运行：写入默认配置（每天 14:55）
+        // 首次运行：写入默认配置（每天 14:58）
         m_items = defaultItems();
         m_autoStart = false;
         m_loaded = true;

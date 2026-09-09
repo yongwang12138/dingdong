@@ -6,7 +6,7 @@
 
 - 系统托盘常驻，关闭窗口不退出程序
 - 支持设置多个每日提醒时间，跨天自动循环调度
-- 首次运行默认添加每天 14:55 的提醒
+- 首次运行默认添加每天 14:58 的提醒
 - 提醒弹窗动画显示在屏幕右下角，停留 8 秒后自动关闭（可拖动、按 Esc 关闭）
 - 支持开机自动启动
 - 图标使用 `resources/app.ico`（用户提供的图标），经 `qt_add_resources` 编入 exe 资源，运行期从 `:/icons/resources/app.ico` 读取
@@ -47,7 +47,7 @@ cmake --build build --config Release
   "version": 1,
   "autostart": false,
   "reminders": [
-    { "time": "14:55" }
+    { "time": "14:58" }
   ]
 }
 ```
