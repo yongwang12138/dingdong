@@ -4,17 +4,52 @@
 #include <QDateTime>
 #include <QDebug>
 
+#ifdef Q_OS_WIN
+#include <QWinEventNotifier>
+#ifndef CREATE_WAITABLE_TIMER_REALTIME
+#define CREATE_WAITABLE_TIMER_REALTIME 0x2
+#endif
+#endif
+
 ReminderManager::ReminderManager(AppConfig* config, QObject* parent)
     : QObject(parent)
     , m_config(config)
 {
+#ifdef Q_OS_WIN
+    // 实时等待定时器：可把系统从现代待机(S0 空闲)/睡眠中唤醒，到点准点触发。
+    // 若当前进程无相关特权导致创建失败，回退到普通等待定时器（仍可唤醒 S3 睡眠）。
+    m_waitTimer = CreateWaitableTimerExW(nullptr, nullptr,
+                                         CREATE_WAITABLE_TIMER_REALTIME,
+                                         TIMER_ALL_ACCESS);
+    if(!m_waitTimer)
+        m_waitTimer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+    if(m_waitTimer)
+    {
+        m_notifier = new QWinEventNotifier(m_waitTimer, this);
+        connect(m_notifier, &QWinEventNotifier::activated, this, [this]()
+        {
+            emit triggered(m_nextText);
+            reschedule();
+        });
+        return;
+    }
+#endif
+    // 最终回退：普通单次 QTimer（跨平台；Windows 上仅当等待定时器不可用时）
     m_timer = new QTimer(this);
     m_timer->setSingleShot(true);
     connect(m_timer, &QTimer::timeout, this, [this]()
     {
         emit triggered(m_nextText);
-        reschedule(); // 触发后立刻排下一次（跨天）
+        reschedule();
     });
+}
+
+ReminderManager::~ReminderManager()
+{
+#ifdef Q_OS_WIN
+    if(m_waitTimer)
+        CloseHandle(m_waitTimer);
+#endif
 }
 
 QList<ReminderItem> ReminderManager::items() const
@@ -119,20 +154,39 @@ NextTrigger ReminderManager::calcNextTrigger(const QList<ReminderItem>& items)
 
 void ReminderManager::reschedule()
 {
-    m_timer->stop();
     const QList<ReminderItem> list = m_config->items();
     if(list.isEmpty())
     {
         qDebug() << "没有配置定时时间";
+#ifdef Q_OS_WIN
+        if(m_waitTimer) CancelWaitableTimer(m_waitTimer);
+#else
+        if(m_timer) m_timer->stop();
+#endif
         return;
     }
     const NextTrigger next = calcNextTrigger(list);
     qDebug() << "下一次触发时刻：" << next.dt.toString("yyyy-MM-dd HH:mm")
              << "文本：" << next.text;
+    m_nextDt = next.dt;
     m_nextText = next.text;
-    const qint64 msToNext = QDateTime::currentDateTime().msecsTo(next.dt);
-    if(msToNext > 0)
+
+#ifdef Q_OS_WIN
+    if(m_waitTimer)
     {
-        m_timer->start(msToNext);
+        // 目标时刻转换为 FILETIME 绝对时间（100ns，自 1601-01-01 UTC）。
+        // SetWaitableTimer 对绝对时间要求传入负数 QuadPart。
+        const qint64 msecs = next.dt.toUTC().toMSecsSinceEpoch();
+        const ULONGLONG ft = (msecs + 11644473600000LL) * 10000ULL;
+        LARGE_INTEGER li{};
+        li.QuadPart = -(LONGLONG)ft;
+        // fResume = FALSE：系统处于现代待机(S0 空闲)时仍准点触发，
+        // 但若已进入 S3/S4 睡眠则不被唤醒，待下次唤醒时再补触发（不强制叫醒电脑）。
+        SetWaitableTimer(m_waitTimer, &li, 0, nullptr, nullptr, FALSE);
     }
+#else
+    const qint64 msToNext = QDateTime::currentDateTime().msecsTo(next.dt);
+    if(msToNext > 0 && m_timer)
+        m_timer->start(msToNext);
+#endif
 }
