@@ -1,0 +1,1 @@
+mt.exe -manifest dingdong.manifest -outputresource:..\bin\dingdong.exe;#1

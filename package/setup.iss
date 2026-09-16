@@ -1,5 +1,5 @@
 #define MyAppName "叮咚"
-#define MyAppVersion "V1.0.00_260914_00"
+#define MyAppVersion "V1.0.00_260916_00"
 #define MyAppExeName "dingdong.exe"
 
 [Setup]
@@ -23,7 +23,7 @@ DisableProgramGroupPage=yes
 ; 取消注释下面一行以在非管理员安装模式下运行（仅为当前用户安装）
 ;PrivilegesRequired=lowest
 OutputDir=..\Output
-OutputBaseFilename=叮咚V1.0.00_260914_00
+OutputBaseFilename=叮咚V1.0.00_260916_00
 SolidCompression=yes
 WizardStyle=modern
 

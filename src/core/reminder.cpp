@@ -4,53 +4,20 @@
 #include <QDateTime>
 #include <QDebug>
 
-#ifdef Q_OS_WIN
-#include <QWinEventNotifier>
-#ifndef CREATE_WAITABLE_TIMER_REALTIME
-#define CREATE_WAITABLE_TIMER_REALTIME 0x2
-#endif
-#endif
+// 单次挂钟核对的最大间隔：既避免“几小时长的 QTimer 在系统空闲时被节流导致明显漂移”，
+// 又把活跃状态下的误差限制在 cap 以内。非忙等轮询（每 cap 才唤醒核对一次墙钟）。
+static constexpr qint64 kMaxCheckMs = 30 * 1000; // 30 秒
 
 ReminderManager::ReminderManager(AppConfig* config, QObject* parent)
     : QObject(parent)
     , m_config(config)
 {
-#ifdef Q_OS_WIN
-    // 实时等待定时器：可把系统从现代待机(S0 空闲)/睡眠中唤醒，到点准点触发。
-    // 若当前进程无相关特权导致创建失败，回退到普通等待定时器（仍可唤醒 S3 睡眠）。
-    m_waitTimer = CreateWaitableTimerExW(nullptr, nullptr,
-                                         CREATE_WAITABLE_TIMER_REALTIME,
-                                         TIMER_ALL_ACCESS);
-    if(!m_waitTimer)
-        m_waitTimer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
-    if(m_waitTimer)
-    {
-        m_notifier = new QWinEventNotifier(m_waitTimer, this);
-        connect(m_notifier, &QWinEventNotifier::activated, this, [this]()
-        {
-            emit triggered(m_nextText);
-            reschedule();
-        });
-        return;
-    }
-#endif
-    // 最终回退：普通单次 QTimer（跨平台；Windows 上仅当等待定时器不可用时）
     m_timer = new QTimer(this);
     m_timer->setSingleShot(true);
-    connect(m_timer, &QTimer::timeout, this, [this]()
-    {
-        emit triggered(m_nextText);
-        reschedule();
-    });
+    connect(m_timer, &QTimer::timeout, this, &ReminderManager::onTimeout);
 }
 
-ReminderManager::~ReminderManager()
-{
-#ifdef Q_OS_WIN
-    if(m_waitTimer)
-        CloseHandle(m_waitTimer);
-#endif
-}
+ReminderManager::~ReminderManager() = default;
 
 QList<ReminderItem> ReminderManager::items() const
 {
@@ -122,6 +89,21 @@ void ReminderManager::setItemText(int index, const QString& text)
     }
 }
 
+void ReminderManager::onTimeout()
+{
+    const QDateTime now = QDateTime::currentDateTime();
+    // 已到达目标时刻则触发；否则只是周期性核对（尚未到点），重新排下一个间隔
+    if(!m_nextDt.isValid() || now >= m_nextDt)
+    {
+        emit triggered(m_nextText);
+        reschedule(); // 触发后安排下一次
+    }
+    else
+    {
+        reschedule(); // 继续挂一个不超过上限的间隔
+    }
+}
+
 // 根据配置的每日时刻列表，计算最近一次触发的 QDateTime 及其文本
 NextTrigger ReminderManager::calcNextTrigger(const QList<ReminderItem>& items)
 {
@@ -158,11 +140,7 @@ void ReminderManager::reschedule()
     if(list.isEmpty())
     {
         qDebug() << "没有配置定时时间";
-#ifdef Q_OS_WIN
-        if(m_waitTimer) CancelWaitableTimer(m_waitTimer);
-#else
-        if(m_timer) m_timer->stop();
-#endif
+        m_timer->stop();
         return;
     }
     const NextTrigger next = calcNextTrigger(list);
@@ -171,22 +149,10 @@ void ReminderManager::reschedule()
     m_nextDt = next.dt;
     m_nextText = next.text;
 
-#ifdef Q_OS_WIN
-    if(m_waitTimer)
-    {
-        // 目标时刻转换为 FILETIME 绝对时间（100ns，自 1601-01-01 UTC）。
-        // SetWaitableTimer 对绝对时间要求传入负数 QuadPart。
-        const qint64 msecs = next.dt.toUTC().toMSecsSinceEpoch();
-        const ULONGLONG ft = (msecs + 11644473600000LL) * 10000ULL;
-        LARGE_INTEGER li{};
-        li.QuadPart = -(LONGLONG)ft;
-        // fResume = FALSE：系统处于现代待机(S0 空闲)时仍准点触发，
-        // 但若已进入 S3/S4 睡眠则不被唤醒，待下次唤醒时再补触发（不强制叫醒电脑）。
-        SetWaitableTimer(m_waitTimer, &li, 0, nullptr, nullptr, FALSE);
-    }
-#else
     const qint64 msToNext = QDateTime::currentDateTime().msecsTo(next.dt);
-    if(msToNext > 0 && m_timer)
-        m_timer->start(msToNext);
-#endif
+    if(msToNext > 0)
+    {
+        // 限幅：临近目标时自然精确到秒；还差很远时每 kMaxCheckMs 核对一次
+        m_timer->start(qMin(msToNext, kMaxCheckMs));
+    }
 }
